@@ -8,28 +8,30 @@ window.onload = function() {
     svg.fitBounds(view.bounds);
     var outline = svg.children[1].children[0]; // get the actual path out of the SVG
     // TODO find a way to do this for any SVG
-    view.onClick = function(event) {
-        console.log(event.point);
-    }
+    
     var circles = [];
     var fillRatio = 0.8;
     var filled = 0;
-    var nTries = 5000;
+    var nTries = 500;
+    var rMin = 3;
+    var rMax = 15;
     while (filled / outline.area < fillRatio && nTries > 0) {
-        var c = addNewCircle(outline,circles,1,15);
+        var c = addNewCircle(outline,circles,rMin,rMax);
         if (!c.flag) {
-            console.log("circle added");
             circles.push(c);
             filled += -c.path.area; // circle is negatively parameterized
-            console.log({
-                outlineArea:outline.area,
-                filled
-            })
         }
         nTries -= 1;
     }
-    console.log({nTries,filled,A:outline.area});
+    console.log({nTries,filledArea:filled,totalArea:outline.area});
     
+    view.onClick = function(event) {
+        console.log(event.point);
+        var c = addNewCircle(outline,circles,rMin,rMax,event.point);
+        if (!c.flag) {
+            circles.push(c);
+        }
+    }
     view.draw(); // draws existing paths
 }
 
@@ -38,18 +40,22 @@ window.onload = function() {
 // rMin and rMax, numbers the minumum and maximum radius of the new circle
 // attempts to find a random circle that is non overlapping with the outline or 
 // any existing circles
+// if start is provided, it will chose a random direction from start to create a circle
 // returns {flag: true} if attempt fails, {path, flag} if attempt is successful
-addNewCircle = function(outline,circles,rMin,rMax) {
-    var parent;
+addNewCircle = function(outline,circles,rMin,rMax,start=null) {
+    var parent, norm;
     if (circles.length > 0 && Math.random() > 1/circles.length) {
-        console.log("circle Parent");
         parent = circles[Math.floor(Math.random()*circles.length)].path; // choose a random circle
     } else {
         parent = outline;
     }
     var t = Math.random();
-    var start = parent.getPointAt(t*parent.length);
-    var norm = parent.getNormalAt(t*parent.length).multiply(-1); // negative one to point inwards
+    if (start === null) {
+        start = parent.getPointAt(t*parent.length);
+        norm = parent.getNormalAt(t*parent.length).multiply(-1); // negative one to point inwards
+    } else { // clicked on spot
+        norm = new Point([Math.cos(Math.PI*2*t),Math.sin(Math.PI*2*t)]);
+    }
     var rOutline = findRBound(outline,rMax,start,norm); // object
     var rCircs = circles.map(circ => {return findCircleBoundingRadius(circ,start,norm,rMin,rMax)});
     var minR = Math.min(rOutline.r,...rCircs);
@@ -115,6 +121,7 @@ findRBound = function(outline,rMax,start,norm,anim=false) {
     var inter = outline.getIntersections(circ.path, loc => {
         return removeRedundant(loc,start,norm,pTol,nTol);
     });
+    circ.path.remove(); // remove path from space
     if (inter.length < 1) { // then rMax is small enough to fit in the outline
         return { r:rMax, flag:false };
     } else {
@@ -168,6 +175,7 @@ removeRedundant = function(loc,start,norm,pTol,nTol) {
 
 // makes a circle Path that starts from the start point with the radius vector pointing from
 // start to the center. Parameterizes circle negatively
+// returns {path, center: Point, radius: Point}
 makeCircle = function(start,radius,c) {
     var radT = radius.rotate(90);
     var q1 = start.add(radius).add(radT);
@@ -175,7 +183,12 @@ makeCircle = function(start,radius,c) {
     var q3 = start.add(radius).subtract(radT);
     var p = new Path.Arc(start,q1,q2);
     var p2 = new Path.Arc(q2, q3, start);
-    return {path: new Path({segments:[...p.segments,...p2.segments],strokeColor:c}),
+    return {path: new Path({
+                segments:[...p.segments,...p2.segments],
+                strokeColor: c,
+                onClick: ev => {ev.stopPropagation();},
+                fillColor: "white"
+            }),
             center: start.add(radius),
             radius: radius};   
 }
